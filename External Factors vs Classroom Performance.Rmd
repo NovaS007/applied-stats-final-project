@@ -1,0 +1,571 @@
+---
+title: "External Factors vs. Classroom Performance"
+author: "Nova Smith"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Importing Libraries}
+sd <- read.csv("Students_Grading_Dataset.csv")
+library(tidyverse)
+library(gridExtra)
+library(ggplot2)
+library(dplyr)
+library(ggpubr) 
+```
+
+# Introduction
+
+I obtained my data set from kaggle.com (Elhemaly, Student Performance & Behavior Dataset, 2025) and it examines 5000 real student scores from an anonymous university somewhere in the world. The data was originally published to kaggle.com on February 16th of 2025 by Mahmoud Elhemaly, however when the data was actually gathered and surveyed is once again, unknown. As discussed later in this introduction, the uncertainty of the exact source for this data poses several significant issues so it is important to keep that in mind while analyzing the results. Regardless, before we can begin with our data analysis, we need to do some data cleaning. Before cleaning up my data, I had 23 different variables but due to the limited time frame of this class, I decided to narrow my search down significantly and only look at a few key variables that were directly relevant to my research questions. Those variables being:
+
+> Department/Major of the Provided Student
+
+> Participation Score (Given by the professor of the course and rated from a scale 0 - 10)
+
+> Total Score (Final numeric score obtained from the class)
+
+> Internet Access (Boolean)
+
+Before continuing with our observations and analysis it is important to note the various ways in which this data may be flawed or biased. Firstly, it is unclear where the university for which these scores came from lies. Needless to say, this is an issue as location can significantly impact results. For example, in this data set, the number of students without internet access at home is roughly $10\%$ which implies that this university is located in a poorer area in the U.S or potentially a third world country that does not have widespread access to internet. This could, in turn, influence the scores we are looking at, swaying the mean score observed to be higher or lower than what it would be otherwise.
+
+Additionally, the *population's* final scores given appear to follow a uniform distribution and **NOT** a normal distribution which is unusual. This makes utilizing standard hypothesis tests difficult but we can get around this hurdle by making use of the central limit theorem (CLT). The CLT states "if you take sufficiently large samples from a population, the samples’ means will be normally distributed, even if the population isn’t normally distributed." (Turney, Central limit theorem: Formula, definition and examples, 2023). This allows us to safely run large simulations that approach a normal distribution and use the results from those simulations in our testing. Though there is some argument among what is considered "large enough" for the CLT, general consensus is that a sample size of $n \ge 30$ is a good enough to approach a normal distribution. In our simulations, we will let $n = 100$ and run 10,000 simulations each time. This should provide very accurate results we can use in testing our hypotheses.
+
+Finally, it is worth noting that the author of this data set admitted that some observations were modified slightly as he was using it for a classroom project for his students, similarly to what we are doing in our class. Needless to say that this is not ideal however I still found the results to be interesting and unexpected. If I knew what portions of the data were modified, I would remove said results from the data being analyzed but because I have no way of knowing what has or has not been tampered with, it is worth taking everything with a grain of salt.
+
+```{r Data Cleaning}
+# Data cleaning
+sd_backup <- sd
+sd <- sd[!duplicated(sd),] 
+sd <- subset(sd, select = c(Department, Participation_Score, Total_Score, Internet_Access_at_Home))
+
+sd$Internet_Access_at_Home <- tolower(trimws(sd$Internet_Access_at_Home))
+sd$Internet_Access_at_Home <- sd$Internet_Access_at_Home == "yes"
+
+#Renaming Variables
+sd <- sd %>% 
+  rename(Major = Department)
+
+sd <- sd %>% 
+  rename(Participation = Participation_Score)
+
+sd <- sd %>% 
+  rename(Final_Grade = Total_Score)
+```
+
+```{r Summarizing Data}
+str(sd)
+
+summary(sd)
+```
+
+# Claim 1:
+
+## Having internet access at home significantly improves one's final grade for a class.
+
+> $H_{0} : \mu_{Internet \: access} \le \mu_{No \: internet \: access}$
+
+> $H_{A} : \mu_{Internet \: access} > \mu_{No \: internet \: access}$
+
+We will perform a pooled t-test and compare the two means from each group using a significance level of $\alpha = 0.05$.
+
+### Visualizing Data
+
+```{r Simulations of Internet vs. No Internet}
+# The number of trials and samples in our simulations
+number_of_trials <- 10000
+number_of_samples <- 100
+
+# Simulates a large number of trials with large samples to simulate a normal
+# distribution so that we can use a two-sample T-Test later
+scores_with_internet <- numeric(number_of_trials)
+for (i in 1:number_of_trials) {
+  sample_scores <- sample(sd$Final_Grade[sd$Internet_Access_at_Home == TRUE],
+                          number_of_samples,
+                          replace = FALSE )
+  scores_with_internet[i] <- mean(sample_scores)
+}
+
+scores_without_internet <- numeric(number_of_trials)
+for (i in 1:number_of_trials) {
+  sample_scores <- sample(sd$Final_Grade[sd$Internet_Access_at_Home == FALSE],
+                          number_of_samples,
+                          replace = FALSE )
+  scores_without_internet[i] <- mean(sample_scores)
+}
+```
+
+```{r ECDFs of Internet Access, fig.align ='center'}
+# Creates an ECDF graph of both groups
+plot(ecdf(scores_with_internet),
+     col = "red",
+     main = "Final Scores for Students With and Without Internet at Home",
+     xlab = "Final Score",
+     ylab = "Cumulative Probability of Score",
+     cex = 0.5)
+
+plot(ecdf(scores_without_internet),
+     col = "blue",
+     cex = 0.5,
+     add = TRUE)
+
+legend("topleft",
+       fill = c("red", "blue"),
+       legend = c("Internet Access at Home", "No Internet Access at Home"))
+```
+
+```{r Histograms of Internet Access, fig.align='center'}
+# Add histogram for scores_with_internet
+hist(scores_with_internet,
+     breaks = 30,
+     col = adjustcolor("red", alpha.f = 0.5),
+     xlim = range(c(scores_with_internet, scores_without_internet)),
+     main = "Distribution of Final Scores Accross Students\nWith and Without Internet Access",
+     xlab = "Final Score Given",
+     ylab = "Frequency of Score",
+     ylim = c(0, 1600))
+
+# Add histogram for scores_without_internet and place it on top of the other
+hist(scores_without_internet,
+     breaks = 30,
+     col = adjustcolor("blue", alpha.f = 0.5),
+     add = TRUE)
+
+# Add a legend
+legend("topleft",
+       legend = c("With Internet", "Without Internet"),
+       fill = c(adjustcolor("red", alpha.f = 0.5),
+                adjustcolor("blue", alpha.f = 0.5)))
+```
+
+### Checking Prerequisites
+
+In order to do a two sample t-test we must check the following prerequisites:
+
+#### Data are collected at the interval or ratio level of measurement
+
+Scores are measured using a ratio level of measurement where there exists an absolute zero and multiples make sense.
+
+#### Data is continuous
+
+The scores are on a continuous scale from 0 to 100.
+
+#### Data is independent
+
+Our samples are randomly collected via simulation from the population and the two groups are independent from each other.
+
+#### Randomly sampled from two normal populations
+
+Though the test scores from our overall population is uniformly distributed, we ran simulations pulling large sample sizes over a large number of time so the CLT should cover this.
+
+### Testing
+
+```{r Two Sample t-test}
+# Checking if the two groups are of equal variance
+var_ratio <- max(var(scores_with_internet))/min(var(scores_without_internet))
+var_ratio
+
+# Because the variance ratio is roughly 1, we can set var.equal to TRUE
+# Performs a pooled t-test
+t.test_results <- t.test(scores_with_internet,
+       scores_without_internet, 
+       alternative = "greater",
+       paired = FALSE,
+       var.equal = TRUE,
+       conf.level = 0.95)
+```
+
+### Findings
+
+We have a very large $p$-value with $p \approx$ `r round(t.test_results$p.value, 2)`. This means that we fail to reject our null hypothesis and cannot conclusively claim that having internet access at home significantly influences one's grades. This was counter intuitive to my initial theory and there could be several factors as to why this is the case. Firstly, this could be because of only roughly $10 \%$ of our population being from homes without internet access meaning that the mean is more likely to be skewed by outlier It could also be that students without internet access at home are less likely to be distracted via social media for example. Regardless of the case, it is important to keep in mind the anonymity of this data set and how that could sway our findings significantly. If this were an official report, I would run more studies from other populations and see if the findings are consistent or if this is simply an outlier.
+
+# Claim 2:
+
+## A student's choice of major has a significant impact on one's final grade for a class.
+
+> $H_{0} : \mu_{Engineering} = \mu_{Business} = \mu_{Mathematics} = \mu_{CS}$
+
+> $H_{A} :$ Not all class subjects have equal final scores.
+
+We will perform an ANOVA test and compare the means from each major using a significance level of $\alpha = 0.05$.
+
+```{r Simulations of Majors}
+# Simulates a large number of trials with large samples to simulate a normal
+# distribution across the four provided class subjects so that we can use a ANOVA test later
+business_scores <- numeric(number_of_trials)
+for (i in 1:number_of_trials) {
+  sample_scores <- sample(sd$Final_Grade[sd$Major == "Business"], 
+                          number_of_samples, 
+                          replace = FALSE)
+  business_scores[i] <- mean(sample_scores)
+}
+
+cs_scores <- numeric(number_of_trials)
+for (i in 1:number_of_trials) {
+  sample_scores <- sample(sd$Final_Grade[sd$Major == "CS"], 
+                          number_of_samples, 
+                          replace = FALSE)
+  cs_scores[i] <- mean(sample_scores)
+}
+
+engineering_scores <- numeric(number_of_trials)
+for (i in 1:number_of_trials) {
+  sample_scores <- sample(sd$Final_Grade[sd$Major == "Engineering"], 
+                          number_of_samples, 
+                          replace = FALSE)
+  engineering_scores[i] <- mean(sample_scores)
+}
+
+math_scores <- numeric(number_of_trials)
+for (i in 1:number_of_trials) {
+  sample_scores <- sample(sd$Final_Grade[sd$Major == "Mathematics"], 
+                          number_of_samples, 
+                          replace = FALSE)
+  math_scores[i] <- mean(sample_scores)
+}
+```
+
+```{r ECDFs of Majors, fig.align='center'}
+# Creates an ECDF graph of all four groups
+plot(ecdf(business_scores),
+     col = "blue",
+     main = "ECDF of Final Class Scores Across Different Subjects",
+     xlab = "Final Score in Class",
+     ylab = "Cumulative Probability of Scores",
+     cex = 0.5)
+
+plot(ecdf(cs_scores), 
+     col = "red",
+     add = TRUE,
+     cex = 0.5)
+
+plot(ecdf(engineering_scores),
+     col = "forestgreen",
+     add = TRUE,
+     cex = 0.5)
+
+plot(ecdf(math_scores),
+     col = "purple",
+     add = TRUE,
+     cex = 0.5)
+
+legend("topleft",
+       legend = c("Business Scores", "Computer Science Scores", "Engineering Scores", "Math Scores"),
+       fill = c("blue", "red", "forestgreen", "purple"))
+```
+
+```{r Histograms of Majors, fig.align='center', warning=FALSE}
+# Creates four histogram plots using ggplot to be displayed together
+p1 <- ggplot(data.frame(score = business_scores), 
+             aes(x = score)) +
+  geom_histogram(bins = 30, 
+                 fill = "blue",
+                 alpha = 0.7) +
+  xlim(range(c(scores_with_internet, 
+               scores_without_internet))) +
+  labs(title = "Business Majors", 
+       x = "Final Score Given", 
+       y = "Frequency of Scores") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+p2 <- ggplot(data.frame(score = cs_scores), 
+             aes(x = score)) +
+  geom_histogram(bins = 30, 
+                 fill = "red",
+                 alpha = 0.7) +
+  xlim(range(c(scores_with_internet, 
+               scores_without_internet))) +
+  labs(title = "CS Majors", 
+       x = "Final Score Given",
+       y = "Frequency of Scores") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+p3 <- ggplot(data.frame(score = engineering_scores),
+             aes(x = score)) +
+  geom_histogram(bins = 30, 
+                 fill = "forestgreen",
+                 alpha = 0.7) +
+  xlim(range(c(scores_with_internet, 
+               scores_without_internet))) +
+  labs(title = "Engineering Majors", 
+       x = "Final Score Given",
+       y = "Frequency of Scores") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+p4 <- ggplot(data.frame(score = math_scores), 
+             aes(x = score)) +
+  geom_histogram(bins = 30, 
+                 fill = "purple",
+                 alpha = 0.7) +
+  xlim(range(c(scores_with_internet, 
+               scores_without_internet))) +
+  labs(title = "Math Majors", 
+       x = "Final Score Given", 
+       y = "Frequency of Scores") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Arranges the plots into a 2x2 matrix
+ggarrange(p1, p2, p3, p4, 
+          ncol = 2, nrow = 2)
+```
+
+### Checking Prerequisites
+
+#### The samples are simple random samples
+
+Our simulations grabbed several simple random samples.
+
+#### The samples are independent from each other
+
+Each major and their respective scores are independent from one another.
+
+#### The data of each factor level are normally distributed.
+
+```{r Checking Normality}
+#Performs a shapiro test for normality
+shapiro.test(sample(business_scores, 5000))
+shapiro.test(sample(cs_scores, 5000))
+shapiro.test(sample(engineering_scores, 5000))
+shapiro.test(sample(math_scores, 5000))
+```
+
+Because all $p$-values are $\ge \alpha = 0.05$ there is no reason to suggest that any one of the sample distributions are **NOT** normal which makes sense due to our use of the CLT.
+
+#### There exists a common variance.
+
+```{r Checking Variance}
+#Puts all of our variances into a single vector
+variances <- c(
+  Business = var(business_scores),
+  CS = var(cs_scores),
+  Engineering = var(engineering_scores),
+  Math = var(math_scores))
+
+# Now grab the maximum and minimum variance from the vector with %>% operator
+max_variance <- variances %>% max()
+min_variance <- variances %>% min()
+
+#Finds the maximum variance ratio by maximizing the numerator and minimizing the denominator 
+variance_ratio <- max_variance/min_variance
+variance_ratio
+```
+
+Because ${Var_{max} \over Var_{min}}\approx$ `r round(variance_ratio, 2)` we can say that the variances are roughly the same and are close enough to perform an ANOVA test.
+
+#### The different samples are from populations that are categorized in only one way.
+
+Samples are only categorized by a student's major.
+
+### Testing
+
+```{r ANOVA Testing}
+#Creates a data frame of the various scores and the major
+scores_df <- data.frame(
+  score = c(business_scores, cs_scores, engineering_scores, math_scores),
+  major = factor(rep(c("Business", "CS", "Engineering", "Mathematics"), 
+                     each = number_of_trials))
+)
+
+# Run ANOVA test
+anova_result <- aov(score ~ major, data = scores_df)
+
+# View the summary
+summary(anova_result)
+```
+
+```{r Tukey HSD}
+# Perform Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+
+# View the result
+print(tukey_result)
+```
+
+### Findings
+
+With a confidence interval of $95 \%$, Tukey's HSD test shows that all majors have significantly different average final grades. Math majors scored the highest overall, while Business majors scored the lowest. Every pairwise comparison was statistically significant, meaning subject choice (at least from the four majors we studied) has a clear impact on student performance. This supports my original claim that one's choice of major has a significant impact on one's final grade.
+
+# Claim 3:
+
+## Classroom participation significantly improves one's chances of passing.
+
+> $H_{0} :$ P(Passing $\vert$ High Participation) $\le$ P(Passing $\vert$ Low Participation)
+
+> $H_{A} :$ P(Passing $\vert$ High Participation) \> P(Passing $\vert$ Low Participation)
+
+We will perform a two proportion z-test and compare the two means from each group using a significance level of $\alpha = 0.05$.
+
+```{r Seperating Groups}
+# Divides the students into two separate groups: 
+# - Those who pass with a high participation score (>= median)
+# - Those who pass with a low participation score (< median)
+# We will use these two groupings for a two-proportion z-Test
+# Calculate median participation score
+median_participation <- median(sd$Participation)
+
+# Grabs the scores of the students who passed with a high participation score (>= median)
+high_participation <- sd$Final_Grade[sd$Participation >= median_participation]
+
+# Grabs the scores of the students who passed with a low participation score (< median)
+low_participation <- sd$Final_Grade[sd$Participation < median_participation]
+
+# Count how many passed (Final_Score > 60) from each group and how many from each group
+high_pass <- sum(high_participation >= 60)
+high_total <- length(high_participation)
+
+low_pass <- sum(low_participation >= 60)
+low_total <- length(low_participation)
+
+high_fail <- high_total - high_pass
+low_fail <- low_total - low_pass
+```
+
+```{r Barplot of Passing | High Participation, fig.align='center'}
+#Creates a matrix for easy graph making
+counts <- matrix(c(low_pass, high_pass,
+                   low_fail, high_fail), 
+                 nrow = 2, 
+                 byrow = TRUE)
+
+# Now make the bar plot
+barplot(counts, 
+        beside = TRUE,
+        names.arg = c("Low Participation", "High Participation"),
+        col = c("forestgreen", "red"),
+        main = "Passing Rates Given Participation",
+        ylab = "Total Number of Students",
+        legend.text = c("Passing Grade", "Failing Grade"))
+```
+
+```{r Pie Graph, fig.align='center'}
+#Creates two separate data frames
+high_data <- data.frame(
+  Status = c("Passing | High Participation", "Failing | High Participation"),
+  Count = c(high_pass, high_fail)
+)
+
+low_data <- data.frame(
+  Status = c("Passing | Low Participation", "Failing | Low Participation"),
+  Count = c(low_pass, low_fail)
+)
+
+# Create pie charts WITHOUT individual legends (will share one)
+high_pie <- ggplot(high_data, aes(x = "", y = Count, fill = Status)) +
+  geom_col(width = 1, color = "black") +
+  coord_polar(theta = "y") +
+  ggtitle("Passing and Failing Rates\nHigh Participation") +
+  scale_fill_manual(values = c("red", "forestgreen")) +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16),
+    plot.margin = margin(20, 20, 20, 20))
+
+low_pie <- ggplot(low_data, aes(x = "", y = Count, fill = Status)) +
+  geom_col(width = 1, color = "black") +
+  coord_polar(theta = "y") +
+  ggtitle("Passing and Failing Rates\nLow Participation") +
+  scale_fill_manual(values = c("red", "forestgreen")) +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16),
+    plot.margin = margin(20, 20, 20, 20))
+
+# Arrange side-by-side with one shared legend
+ggarrange(
+  high_pie, low_pie,
+  ncol = 2, nrow = 1,
+  common.legend = TRUE,
+  legend = "bottom"
+)
+```
+
+### Checking Prerequisites
+
+#### Observations are independent from each other
+
+These two groups are independent from each other.
+
+#### Random sampling took place
+
+We ran many random simulations gathering randomized samples, utilizing the CLT.
+
+#### All groups have roughly equal variance
+
+```{r Checking Variance - Participation}
+variances_of_participation <- c(
+  var(high_pass),
+  var(high_fail),
+  var(low_pass),
+  var(low_fail))
+
+max_variance_participation <- variances %>% max()
+min_variance_participation <- variances %>% min()
+
+variance_ratio_participation <- max_variance_participation/min_variance_participation
+variance_ratio_participation
+```
+
+Because ${Var_{max} \over Var_{min}} \approx$ `r round(variance_ratio, 2)` we can say that the variances are roughly the same.
+
+#### The differences between observations across groups is approximately normal
+
+As described earlier, thanks to the CLT, our samples will approach a normal distribution given enough simulations.
+
+#### Every cell has at least 10 observed values
+
+All groups have at least 10 observations as seen below.
+
+```{r Number in Each Group}
+high_pass
+high_fail
+low_pass
+low_fail
+```
+
+### Testing
+
+```{r Two-proportion z-test}
+# Swap rows in the counts matrix to test High > Low
+counts_alt <- rbind(
+  c(high_pass, low_pass),
+  c(high_fail, low_fail)
+)
+
+prop_test_result <- prop.test(counts_alt, 
+                              correct = FALSE,
+                              alternative = "greater")
+
+print(prop_test_result)
+```
+
+### Findings
+
+With a $p \approx$ `r round(prop_test_result$p.value, 2)`, we fail to reject the null hypothesis meaning that there is no conclusive evidence stating that the rate of passing a class given high participation is greater than passing a class given low participation.
+
+# Conclusions
+
+In this project, I examined the relationship between three external factors and there impact on a student's academics: whether or not a student had internet access at home, a student's choice of major, and classroom participation. While having internet access at home and high participation in class were expected to play meaningful roles in academic success, our data did not support those assumptions. Both tests yielded *very* high $p$-values and showed no statistically significant effect on final grades or passing rates. However, one's choice of major demonstrated a clear and significant influence on classroom performance, with math majors achieving the highest average scores and business majors the lowest (out of the only four possible majors that were included in this study).
+
+These findings suggest that while certain external supports may not directly correlate with better performance in this data set, the subject matter itself is a strong predictor of academic outcomes. However, it's important to interpret these results with caution given the data set's uncertain origin and potential modifications, as well as the limitations inherent in simulated sampling. This project serves as an important reminder to always consider where data comes from before analyzing as it can sometimes lead to inaccurate or misleading results. Actually doing statistical testing correctly and interpreting the results is only one half of applied stats. The other half is what comes beforehand and what I learned in this project; the most important part of applied stats is actually obtaining your data, understanding the potential flaws of its origins, and being open and honest about said flaws.
+
+# Bibliography
+
+Elhemaly, M. (2025, February 16). Student Performance & Behavior Dataset. Kaggle. 
+\n 
+
+<https://www.kaggle.com/datasets/mahmoudelhemaly/students-grading-dataset/data>
+
+Turney, S. (2023, June 22). Central limit theorem: Formula, definition & examples. Scribbr.
+\n 
+
+<https://www.scribbr.com/statistics/central-limit-theorem/>
+
+Vorwerk, K. (n.d.-a). Introduction to Applied Experimental Design and Statistical Analysis with R.
+\n 
+
+<https://bookdown.org/kvorwerk/complete/>
